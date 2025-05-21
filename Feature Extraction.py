@@ -62,7 +62,107 @@ def extract_20_features(signal, sampling_rate=12000):
         'Frequency Center': freq_center
     }
 
-
+def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
+    # Initialize dictionaries to store features
+    train_features = {
+        'raw': [], 'emd': [], 'eemd': [], 'ceemdan': [],
+        'raw_emd': [], 'raw_eemd': [], 'raw_ceemdan': []
+    }
+    test_features = {
+        'raw': [], 'emd': [], 'eemd': [], 'ceemdan': [],
+        'raw_emd': [], 'raw_eemd': [], 'raw_ceemdan': []
+    }
+    
+    # Process each fault condition
+    for fault_type, train_signal in train_set.items():
+        test_signal = test_set[fault_type]
+        
+        # Process training data
+        train_segments = segment_signal(train_signal, frame_size=segment_size, overlap=0)
+        # Ensure we get 81 segments per condition for training
+        train_segments = train_segments[:81]
+        
+        # Process test data
+        test_segments = segment_signal(test_signal, frame_size=segment_size, overlap=0)
+        # Ensure we get 34 segments per condition for testing
+        test_segments = test_segments[:34]
+        
+        # Extract raw features
+        train_raw_features = [extract_20_features(segment) for segment in train_segments]
+        test_raw_features = [extract_20_features(segment) for segment in test_segments]
+        
+        # Add fault label
+        for features in train_raw_features:
+            features['Fault_Type'] = fault_type
+            train_features['raw'].append(features)
+        
+        for features in test_raw_features:
+            features['Fault_Type'] = fault_type
+            test_features['raw'].append(features)
+        
+        # Apply decomposition and extract features
+        for decomp_type in ['emd', 'eemd', 'ceemdan']:
+            train_decomp_features = []
+            test_decomp_features = []
+            
+            for segment in train_segments:
+                # Apply appropriate decomposition
+                if decomp_type == 'emd':
+                    imfs = emd(segment)
+                elif decomp_type == 'eemd':
+                    imfs = eemd(segment, emd_func=emd)
+                else:  # ceemdan
+                    imfs = ceemdan(segment, emd_func=emd)
+                
+                # Select most relevant IMFs
+                selected_imfs = select_high_corr_imfs(segment, imfs)
+                # Extract features from each IMF and combine
+                imf_features = extract_20_features(selected_imfs[0])  # Using top IMF
+                imf_features['Fault_Type'] = fault_type
+                train_decomp_features.append(imf_features)
+            
+            for segment in test_segments:
+                # Apply appropriate decomposition
+                if decomp_type == 'emd':
+                    imfs = emd(segment)
+                elif decomp_type == 'eemd':
+                    imfs = eemd(segment, emd_func=emd)
+                else:  # ceemdan
+                    imfs = ceemdan(segment, emd_func=emd)
+                
+                # Select most relevant IMFs
+                selected_imfs = select_high_corr_imfs(segment, imfs)
+                # Extract features from each IMF and combine
+                imf_features = extract_20_features(selected_imfs[0])  # Using top IMF
+                imf_features['Fault_Type'] = fault_type
+                test_decomp_features.append(imf_features)
+            
+            # Store decomposition features
+            train_features[decomp_type].extend(train_decomp_features)
+            test_features[decomp_type].extend(test_decomp_features)
+            
+            # Create combined feature sets (raw + decomposition)
+            for i, raw_feat in enumerate(train_raw_features):
+                combined = {**raw_feat, **{f"{decomp_type}_{k}": v for k, v in train_decomp_features[i].items() 
+                                         if k != 'Fault_Type'}}
+                train_features[f'raw_{decomp_type}'].append(combined)
+            
+            for i, raw_feat in enumerate(test_raw_features):
+                combined = {**raw_feat, **{f"{decomp_type}_{k}": v for k, v in test_decomp_features[i].items() 
+                                         if k != 'Fault_Type'}}
+                test_features[f'raw_{decomp_type}'].append(combined)
+    
+    # Convert to DataFrames for easier handling
+    import pandas as pd
+    train_dfs = {k: pd.DataFrame(v) for k, v in train_features.items()}
+    test_dfs = {k: pd.DataFrame(v) for k, v in test_features.items()}
+    
+    # Save feature files
+    for k in train_dfs.keys():
+        train_dfs[k].to_csv(f"{k}_train_features.csv", index=False)
+        test_dfs[k].to_csv(f"{k}_test_features.csv", index=False)
+    
+    return train_dfs, test_dfs
 
 
 
