@@ -3,7 +3,7 @@
 
 from sklearn.model_selection import train_test_split
 from Preprocessing import load_de_signals, remove_outliers, normalize
-from Feature Extraction import extract_features_for_all_datasets
+from Feature_Extraction import extract_features_for_all_datasets
 
 def prepare_datasets(folder_path):
     """Prepare the training and test datasets"""
