@@ -1,10 +1,12 @@
+# Feature_Extraction.py
 import numpy as np
-
-
+import pandas as pd
+from Preprocessing import segment_signal
+from EMD_EEMD_CEEMDAN import emd, eemd, ceemdan, select_high_corr_imfs
 
 def extract_20_features(signal, sampling_rate=12000):
     N = len(signal)
-
+    
     # Time domain features
     xmax = np.max(signal)                        # 1. Maximum
     xmin = np.min(signal)                        # 2. Minimum
@@ -21,23 +23,24 @@ def extract_20_features(signal, sampling_rate=12000):
     ps = np.abs(fft_vals) ** 2  # Power Spectrum
     ps_norm = ps / np.sum(ps) if np.sum(ps) != 0 else ps
 
-    mean_freq = np.sum(freqs * ps_norm)                      # 9. Mean Frequency
+    mean_freq = np.sum(freqs * ps_norm)          # 9. Mean Frequency
     power_bw = np.sqrt(np.sum((freqs - mean_freq)**2 * ps_norm))  # 10. Power Bandwidth
-
-    crest = xmax / xrms if xrms != 0 else 0                  # 11. Crest Factor
-    form = xrms / np.mean(np.abs(signal))                    # 12. Form Factor
-    peak_to_peak = xmax - xmin                               # 13. Peak-to-Peak
-    xvar = np.var(signal)                                    # 14. Variance
-    xmed = np.median(signal)                                 # 15. Median
-    mean_square = xrms**2                                    # 16. Mean Square
+    
+    crest = xmax / xrms if xrms != 0 else 0      # 11. Crest Factor
+    form = xrms / np.mean(np.abs(signal))        # 12. Form Factor
+    peak_to_peak = xmax - xmin                   # 13. Peak-to-Peak
+    xvar = np.var(signal)                        # 14. Variance 
+    xmed = np.median(signal)                     # 15. Median
+    mean_square = xrms**2                        # 16. Mean Square
     margin = xmax / np.sqrt(mean_square) if mean_square != 0 else 0  # 17. Margin
-    impulse = xrms**2 / np.mean(np.abs(signal))              # 18. Impulse
+    impulse = xrms**2 / np.mean(np.abs(signal))  # 18. Impulse
 
-    # 19. Median Frequency (frequency where cumulative power reaches 50%)
+    # 19. Median Frequency
     cumulative_power = np.cumsum(ps_norm)
     median_freq = freqs[np.searchsorted(cumulative_power, 0.5)]
 
-    freq_center = np.sum(freqs * ps_norm)                    # 20. Frequency Center (same as mean frequency)
+    # 20. Frequency Center (same as mean frequency)
+    freq_center = np.sum(freqs * ps_norm)
 
     return {
         'Maximum': xmax,
@@ -63,6 +66,8 @@ def extract_20_features(signal, sampling_rate=12000):
     }
 
 def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
+    """Extract features from training and test datasets"""
+    
     # Initialize dictionaries to store features
     train_features = {
         'raw': [], 'emd': [], 'eemd': [], 'ceemdan': [],
@@ -75,23 +80,22 @@ def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
     
     # Process each fault condition
     for fault_type, train_signal in train_set.items():
+        print(f"Processing fault type: {fault_type}")
         test_signal = test_set[fault_type]
         
         # Process training data
         train_segments = segment_signal(train_signal, frame_size=segment_size, overlap=0)
-        # Ensure we get 81 segments per condition for training
-        train_segments = train_segments[:81]
+        train_segments = train_segments[:81]  # Ensure 81 segments per condition
         
         # Process test data
         test_segments = segment_signal(test_signal, frame_size=segment_size, overlap=0)
-        # Ensure we get 34 segments per condition for testing
-        test_segments = test_segments[:34]
+        test_segments = test_segments[:34]  # Ensure 34 segments per condition
         
         # Extract raw features
         train_raw_features = [extract_20_features(segment) for segment in train_segments]
         test_raw_features = [extract_20_features(segment) for segment in test_segments]
         
-        # Add fault label
+        # Add fault labels
         for features in train_raw_features:
             features['Fault_Type'] = fault_type
             train_features['raw'].append(features)
@@ -102,6 +106,7 @@ def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
         
         # Apply decomposition and extract features
         for decomp_type in ['emd', 'eemd', 'ceemdan']:
+            print(f"Applying {decomp_type} decomposition...")
             train_decomp_features = []
             test_decomp_features = []
             
@@ -114,15 +119,13 @@ def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
                 else:  # ceemdan
                     imfs = ceemdan(segment, emd_func=emd)
                 
-                # Select most relevant IMFs
+                # Select most relevant IMFs and extract features
                 selected_imfs = select_high_corr_imfs(segment, imfs)
-                # Extract features from each IMF and combine
-                imf_features = extract_20_features(selected_imfs[0])  # Using top IMF
+                imf_features = extract_20_features(selected_imfs[0])
                 imf_features['Fault_Type'] = fault_type
                 train_decomp_features.append(imf_features)
             
             for segment in test_segments:
-                # Apply appropriate decomposition
                 if decomp_type == 'emd':
                     imfs = emd(segment)
                 elif decomp_type == 'eemd':
@@ -130,10 +133,8 @@ def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
                 else:  # ceemdan
                     imfs = ceemdan(segment, emd_func=emd)
                 
-                # Select most relevant IMFs
                 selected_imfs = select_high_corr_imfs(segment, imfs)
-                # Extract features from each IMF and combine
-                imf_features = extract_20_features(selected_imfs[0])  # Using top IMF
+                imf_features = extract_20_features(selected_imfs[0])
                 imf_features['Fault_Type'] = fault_type
                 test_decomp_features.append(imf_features)
             
@@ -143,17 +144,18 @@ def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
             
             # Create combined feature sets (raw + decomposition)
             for i, raw_feat in enumerate(train_raw_features):
-                combined = {**raw_feat, **{f"{decomp_type}_{k}": v for k, v in train_decomp_features[i].items() 
-                                         if k != 'Fault_Type'}}
+                combined = {**raw_feat, **{f"{decomp_type}_{k}": v 
+                          for k, v in train_decomp_features[i].items() 
+                          if k != 'Fault_Type'}}
                 train_features[f'raw_{decomp_type}'].append(combined)
             
             for i, raw_feat in enumerate(test_raw_features):
-                combined = {**raw_feat, **{f"{decomp_type}_{k}": v for k, v in test_decomp_features[i].items() 
-                                         if k != 'Fault_Type'}}
+                combined = {**raw_feat, **{f"{decomp_type}_{k}": v 
+                          for k, v in test_decomp_features[i].items() 
+                          if k != 'Fault_Type'}}
                 test_features[f'raw_{decomp_type}'].append(combined)
     
-    # Convert to DataFrames for easier handling
-    import pandas as pd
+    # Convert to DataFrames
     train_dfs = {k: pd.DataFrame(v) for k, v in train_features.items()}
     test_dfs = {k: pd.DataFrame(v) for k, v in test_features.items()}
     
@@ -163,18 +165,3 @@ def extract_features_for_all_datasets(train_set, test_set, segment_size=1024):
         test_dfs[k].to_csv(f"{k}_test_features.csv", index=False)
     
     return train_dfs, test_dfs
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
